@@ -1,0 +1,6 @@
+.idea
+.idea/*
+*.log
+.DS_Store
+logs
+go.sum
