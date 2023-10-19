@@ -45,7 +45,7 @@ AsyncClient.Producer.AddDelayMessage(context.Background(), 3*time.Second, NewMes
 	))
 ```
 
-#### 试试任务
+#### 添加实时任务
 ```go
 var message = NewMessage(
 "queue",
