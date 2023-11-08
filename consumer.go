@@ -5,29 +5,25 @@ import (
 	"fmt"
 	"github.com/redis/go-redis/v9"
 	"github.com/sourcegraph/conc/pool"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // 将有序集合中指定区间的元素移动到列表中，删除有序集合的元素，返回符合的元素的数量
 var moveScript = redis.NewScript(`
-local zsetName = KEYS[1]
-local startIdx = tonumber(ARGV[1])
-local endIdx = tonumber(ARGV[2])
-
-local zsetValues = redis.call('ZRANGEBYSCORE', zsetName, startIdx, endIdx)
-
+local zsetValues = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1] , ARGV[2])
 for _, value in ipairs(zsetValues) do
-    local separatorIndex = string.find(value, "||") 
+    local separatorIndex = string.find(value, '||') 
     if separatorIndex then
         local queueName = string.sub(value, 1, separatorIndex - 1)
         if queueName then
-            local valueWithoutPrefix = string.sub(value, separatorIndex + 2)
-            redis.call('RPUSH', queueName, valueWithoutPrefix)
+            redis.call('RPUSH', queueName, string.sub(value, separatorIndex + 2))
         end
     end
 end
-redis.call('ZREMRANGEBYSCORE', zsetName, startIdx, endIdx)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], ARGV[1] , ARGV[2])
 
 return #zsetValues
 `)
@@ -107,9 +103,46 @@ func (l *AsyncConsumer) delayListToReadyList(delayListName string) {
 	for AsyncClient.IsRuning() {
 		duration, _ := time.ParseDuration("-500ms")
 		var now = time.Now().Add(duration)
+		if AsyncClient.Config().NotLua {
+			var zRangeByScore = AsyncClient.Config().Client.ZRangeByScore(context.Background(), delayListName, &redis.ZRangeBy{
+				Min:    strconv.Itoa(0),
+				Max:    strconv.FormatInt(now.Unix(), 10),
+				Offset: 0,
+				Count:  2000,
+			})
+			if err := zRangeByScore.Err(); err != nil {
+				AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v1：%e", err))
+				continue
+			}
+			if len(zRangeByScore.Val()) > 0 {
+				var dataList = make(map[string][]string)
+				for _, row := range zRangeByScore.Val() {
+					if index := strings.Index(row, "||"); index != -1 {
+						var key = row[:index]
+						var value = row[index+2:]
+						dataList[key] = append(dataList[key], value)
+					}
+				}
+				for key, values := range dataList {
+					var batchValue []interface{}
+					for _, row := range values {
+						batchValue = append(batchValue, key+"||"+row)
+					}
+					if _, err := AsyncClient.Config().Client.Pipelined(context.Background(), func(pipeliner redis.Pipeliner) error {
+						pipeliner.RPush(context.Background(), key, values)
+						pipeliner.ZRem(context.Background(), delayListName, batchValue...)
+						return nil
+					}); err != nil {
+						AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v2：%e", err))
+					}
+				}
+			}
+			continue
+		}
+
 		var moveErr = moveScript.Run(context.Background(), AsyncClient.Config().Client, []string{
 			delayListName,
-		}, 0, now.Unix()).Err()
+		}, strconv.Itoa(0), strconv.FormatInt(now.Unix(), 10)).Err()
 		if moveErr != nil {
 			AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误：%e", moveErr))
 		}

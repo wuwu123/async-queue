@@ -20,6 +20,8 @@ type Config struct {
 	RunMaxTime time.Duration
 	//redis链接
 	Client *redis.Client
+	//是否走lua脚本
+	NotLua bool
 }
 
 type Log interface {
@@ -84,17 +86,17 @@ func (l *AsyncScript) SetLog(log Log) *AsyncScript {
 }
 
 func (l AsyncScript) GetQueueName(queueName string) string {
-	return fmt.Sprintf("%s%s", l.config.QueueNamePrefix, queueName)
+	return fmt.Sprintf("{async-queue}_%s%s", l.config.QueueNamePrefix, queueName)
 }
 
 // GetDelayListName 延迟队列的名字
 func (l AsyncScript) GetDelayListName() string {
-	return fmt.Sprintf("%s%s", l.config.QueueNamePrefix, "async:delaylist")
+	return l.GetQueueName("async:delaylist")
 }
 
 // GetWaitAckListName 等待确认的队列的名字
 func (l AsyncScript) GetWaitAckListName() string {
-	return fmt.Sprintf("%s%s", l.config.QueueNamePrefix, "async:waitack")
+	return l.GetQueueName("async:waitack")
 }
 
 func (l AsyncScript) WriteErr(err error) {

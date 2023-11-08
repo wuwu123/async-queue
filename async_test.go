@@ -19,19 +19,23 @@ func (l AsyncLog) Error(v error) {
 }
 func initClient() {
 	client := redis.NewClient(&redis.Options{
-		Addr: "127.0.0.1:6379",
+		Addr:     "r-2zeks3bi66byn1a1ntpd.redis.rds.aliyuncs.com:65379",
+		Password: "xTLEq^85&7Cp9pRc",
+		DB:       2,
 	})
 	_ = InitAsyncScript(Config{
 		QueueNamePrefix: "test_v1_",
 		Client:          client,
+		NotLua:          true,
 	})
 	AsyncClient.SetLog(AsyncLog{})
 }
+
 func TestAddDelayMessage(t *testing.T) {
 	initClient()
 	AsyncClient.Producer.AddDelayMessage(context.Background(), 3*time.Second, NewMessage(
 		"queue",
-		[]byte("1234"),
+		Payload("1234"),
 	))
 	AsyncClient.Consumer.Add(AsyncConsumerTask{
 		TaskName: "queue",
@@ -52,9 +56,9 @@ func TestAddDelaysMessage(t *testing.T) {
 	initClient()
 	var message = NewMessage(
 		"queue",
-		[]byte("1234"),
+		Payload("1234"),
 	)
-	message.RunRate = []time.Duration{3 * time.Second, 3 * time.Second}
+	//message.RunRate = []time.Duration{3 * time.Second, 3 * time.Second}
 	AsyncClient.Producer.AddDelayMessage(context.Background(), 4*time.Second, message)
 	AsyncClient.Consumer.Add(AsyncConsumerTask{
 		TaskName: "queue",
@@ -75,7 +79,7 @@ func TestAddAckMessage(t *testing.T) {
 	initClient()
 	var message = NewMessage(
 		"queue",
-		[]byte("1234"),
+		Payload("1234"),
 	)
 	message.WithAck(true, 2*time.Second)
 	AsyncClient.Producer.AddDelayMessage(context.Background(), 1*time.Second, message)
@@ -105,7 +109,7 @@ func TestAddChMessage(t *testing.T) {
 		for {
 			var message = NewMessage(
 				"queue",
-				[]byte("1234"),
+				Payload("1234"),
 			)
 			AsyncClient.Producer.AddBatchMessage(context.Background(), []*Message{message})
 			time.Sleep(1 * time.Second)
