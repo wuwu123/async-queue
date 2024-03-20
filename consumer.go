@@ -99,43 +99,55 @@ func (l *AsyncConsumer) Add(task AsyncConsumerTask) {
 	}
 }
 
+func (l *AsyncConsumer) delayListToReadyListNotLua(maxTime time.Time, delayListName string) {
+	var zRangeByScore = AsyncClient.Config().Client.ZRangeByScore(context.Background(), delayListName, &redis.ZRangeBy{
+		Min:    strconv.Itoa(0),
+		Max:    strconv.FormatInt(maxTime.Unix(), 10),
+		Offset: 0,
+		Count:  2000,
+	})
+	time.Sleep(1 * time.Second)
+	if err := zRangeByScore.Err(); err != nil {
+		AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v1：%e", err))
+		return
+	}
+	if len(zRangeByScore.Val()) > 0 {
+		var dataList = make(map[string][]string)
+		for _, row := range zRangeByScore.Val() {
+			if index := strings.Index(row, "||"); index != -1 {
+				var key = row[:index]
+				var value = row[index+2:]
+				dataList[key] = append(dataList[key], value)
+			}
+		}
+		for key, values := range dataList {
+			var batchValue []interface{}
+			for _, row := range values {
+				batchValue = append(batchValue, key+"||"+row)
+			}
+			if _, err := AsyncClient.Config().Client.Pipelined(context.Background(), func(pipeliner redis.Pipeliner) error {
+				pipeliner.RPush(context.Background(), key, values)
+				pipeliner.ZRem(context.Background(), delayListName, batchValue...)
+				return nil
+			}); err != nil {
+				AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v2：%e", err))
+			}
+		}
+	}
+}
+
 func (l *AsyncConsumer) delayListToReadyList(delayListName string) {
 	for AsyncClient.IsRuning() {
 		duration, _ := time.ParseDuration("-500ms")
 		var now = time.Now().Add(duration)
 		if AsyncClient.Config().NotLua {
-			var zRangeByScore = AsyncClient.Config().Client.ZRangeByScore(context.Background(), delayListName, &redis.ZRangeBy{
-				Min:    strconv.Itoa(0),
-				Max:    strconv.FormatInt(now.Unix(), 10),
-				Offset: 0,
-				Count:  2000,
-			})
-			if err := zRangeByScore.Err(); err != nil {
-				AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v1：%e", err))
+			var lock = AsyncClient.Config().Client.SetNX(context.Background(), "delayListToReadyListlock", "1", 2*time.Second)
+			if lock.Val() {
 				continue
 			}
-			if len(zRangeByScore.Val()) > 0 {
-				var dataList = make(map[string][]string)
-				for _, row := range zRangeByScore.Val() {
-					if index := strings.Index(row, "||"); index != -1 {
-						var key = row[:index]
-						var value = row[index+2:]
-						dataList[key] = append(dataList[key], value)
-					}
-				}
-				for key, values := range dataList {
-					var batchValue []interface{}
-					for _, row := range values {
-						batchValue = append(batchValue, key+"||"+row)
-					}
-					if _, err := AsyncClient.Config().Client.Pipelined(context.Background(), func(pipeliner redis.Pipeliner) error {
-						pipeliner.RPush(context.Background(), key, values)
-						pipeliner.ZRem(context.Background(), delayListName, batchValue...)
-						return nil
-					}); err != nil {
-						AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v2：%e", err))
-					}
-				}
+			l.delayListToReadyListNotLua(now, delayListName)
+			if lockErr := AsyncClient.Config().Client.Del(context.Background(), "delayListToReadyListlock").Err(); lockErr != nil {
+				AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误释放锁失败v2：%e", lockErr))
 			}
 			continue
 		}

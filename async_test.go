@@ -19,8 +19,8 @@ func (l AsyncLog) Error(v error) {
 }
 func initClient() {
 	client := redis.NewClient(&redis.Options{
-		Addr:     "r-2zeks3bi66byn1a1ntpd.redis.rds.aliyuncs.com:65379",
-		Password: "xTLEq^85&7Cp9pRc",
+		Addr:     "127.0.0.1:6379",
+		Password: "",
 		DB:       2,
 	})
 	_ = InitAsyncScript(Config{
@@ -33,21 +33,42 @@ func initClient() {
 
 func TestAddDelayMessage(t *testing.T) {
 	initClient()
-	AsyncClient.Producer.AddDelayMessage(context.Background(), 3*time.Second, NewMessage(
-		"queue",
-		Payload("1234"),
-	))
-	AsyncClient.Consumer.Add(AsyncConsumerTask{
-		TaskName: "queue",
-		TaskDesc: "测试",
-		Process: func(message Message) error {
-			fmt.Println("消费时间", time.Now().String(), "数据时间", message.CreateTime.String(), "时间间隔", fmt.Sprintf("[%s]", time.Since(message.CreateTime)), message.Payload.String())
-			return nil
-		},
-	})
+
 	go func() {
+		AsyncClient.Consumer.Add(AsyncConsumerTask{
+			TaskName: "queue",
+			TaskDesc: "测试",
+			Process: func(message Message) error {
+				fmt.Println("消费时间", time.Now().String(), "数据时间", message.CreateTime.String(), "时间间隔", fmt.Sprintf("[%s]", time.Since(message.CreateTime)), message.Payload.String())
+				return nil
+			},
+		})
 		AsyncClient.Consumer.Start()
 	}()
+	go func() {
+		AsyncClient.Consumer.Add(AsyncConsumerTask{
+			TaskName: "queue",
+			TaskDesc: "测试",
+			Process: func(message Message) error {
+				fmt.Println("消费时间", time.Now().String(), "数据时间", message.CreateTime.String(), "时间间隔", fmt.Sprintf("[%s]", time.Since(message.CreateTime)), message.Payload.String())
+				return nil
+			},
+		})
+		AsyncClient.Consumer.Start()
+	}()
+	go func() {
+		AsyncClient.Consumer.Add(AsyncConsumerTask{
+			TaskName: "queue",
+			TaskDesc: "测试",
+			Process: func(message Message) error {
+				fmt.Println("消费时间", time.Now().String(), "数据时间", message.CreateTime.String(), "时间间隔", fmt.Sprintf("[%s]", time.Since(message.CreateTime)), message.Payload.String())
+				return nil
+			},
+		})
+		AsyncClient.Consumer.Start()
+	}()
+
+	time.Sleep(1)
 	time.Sleep(5 * time.Second)
 }
 
