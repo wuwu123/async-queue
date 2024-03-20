@@ -67,7 +67,7 @@ var asyncConsumerOnce sync.Once
 func AsyncConsumerClient() *AsyncConsumer {
 	asyncConsumerOnce.Do(func() {
 		asyncConsumerClient = &AsyncConsumer{
-			syncInterval: 2 * time.Second,
+			syncInterval: 5 * time.Second,
 			add:          make(chan AsyncConsumerTask),
 			stop:         make(chan struct{}),
 		}
@@ -106,7 +106,6 @@ func (l *AsyncConsumer) delayListToReadyListNotLua(maxTime time.Time, delayListN
 		Offset: 0,
 		Count:  2000,
 	})
-	time.Sleep(1 * time.Second)
 	if err := zRangeByScore.Err(); err != nil {
 		AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误v1：%e", err))
 		return
@@ -141,12 +140,12 @@ func (l *AsyncConsumer) delayListToReadyList(delayListName string) {
 		duration, _ := time.ParseDuration("-500ms")
 		var now = time.Now().Add(duration)
 		if AsyncClient.Config().NotLua {
-			var lock = AsyncClient.Config().Client.SetNX(context.Background(), "delayListToReadyListlock", "1", 2*time.Second)
-			if lock.Val() {
+			var lock = AsyncClient.Config().Client.SetNX(context.Background(), delayListName+":lock", "1", 4*time.Second)
+			if !lock.Val() {
 				continue
 			}
 			l.delayListToReadyListNotLua(now, delayListName)
-			if lockErr := AsyncClient.Config().Client.Del(context.Background(), "delayListToReadyListlock").Err(); lockErr != nil {
+			if lockErr := AsyncClient.Config().Client.Del(context.Background(), delayListName+":lock").Err(); lockErr != nil {
 				AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误释放锁失败v2：%e", lockErr))
 			}
 			continue
