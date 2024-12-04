@@ -137,6 +137,7 @@ func (l *AsyncConsumer) delayListToReadyListNotLua(maxTime time.Time, delayListN
 
 func (l *AsyncConsumer) delayListToReadyList(delayListName string) {
 	for AsyncClient.IsRuning() {
+		time.Sleep(500 * time.Millisecond)
 		duration, _ := time.ParseDuration("-500ms")
 		var now = time.Now().Add(duration)
 		if AsyncClient.Config().NotLua {
@@ -157,7 +158,6 @@ func (l *AsyncConsumer) delayListToReadyList(delayListName string) {
 		if moveErr != nil {
 			AsyncClient.WriteErr(fmt.Errorf("redis从延迟队列迁移数据错误：%e", moveErr))
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 }
 
